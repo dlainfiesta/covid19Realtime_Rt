@@ -11,7 +11,7 @@ Created on Mon Jun 15 18:47:05 2020
 import os
 
 print(os.getcwd())
-path= 'C:\\Users\\diego\\Desktop\\DL\\Covid_Guatemala\\Ro_Guatemala'
+path= 'C:\\Users\\diego\\Desktop\\DL\\Covid_Guatemala\\Rt_Guatemala_m1'
 os.chdir(path)
 print(os.getcwd())
 
@@ -33,6 +33,8 @@ from matplotlib.patches import Patch
 
 from scipy import stats as sps
 from scipy.interpolate import interp1d
+
+from datetime import datetime
 
 #%% Loading data Guatemala
 
@@ -66,8 +68,11 @@ def prepare_cases(cases, cutoff=25):
 
 original, smoothed = prepare_cases(confirmed)
 
+update= original.tail(1).index[0].strftime('%d-%m-%Y')
+update_string= original.tail(1).index[0].strftime('%d_%m_%Y')
+
 fig, ax= plt.subplots(figsize=(5,3))
-original.plot(title=f"{state_name} Nuevos Casos por Día",
+original.plot(title=f"{state_name} Nuevos Casos por Día act. "+update,
                c='k',
                linestyle=':',
                alpha=.5,
@@ -85,10 +90,17 @@ ax.yaxis.set_ticks(np.arange(0, 600, 50))
 ax.grid(color='lightgrey', linestyle='-', linewidth= 0.5);
 ax.legend();
 fig.tight_layout()
-fig.savefig(path_output+'Guatemala_nuevos_casos_suavizada.jpg', dpi=500)
+fig.savefig(path_output+update_string+'_'+'Guatemala_nuevos_casos_suavizada.jpg', dpi=500)
+
+#%% Getting posteriors
+
+GAMMA = 1/7
+# We create an array for every possible value of Rt
+R_T_MAX = 12
+r_t_range = np.linspace(0, R_T_MAX, R_T_MAX*100+1)
 
 
-def get_posteriors(sr, sigma=0.30):
+def get_posteriors(sr, sigma=0.25):
 
     # (1) Calculate Lambda
     lam = sr[:-1].values * np.exp(GAMMA * (r_t_range[:, None] - 1))
@@ -145,7 +157,7 @@ def get_posteriors(sr, sigma=0.30):
     
     return posteriors, log_likelihood
 
-# Note that we're fixing sigma to a value just for the example
+# We fix sigma,this value will be optimized later
 posteriors, log_likelihood = get_posteriors(smoothed, sigma=.15)
 
 
@@ -159,7 +171,7 @@ posteriors.plot(title=f'{state_name} - Posterior diaria para $R_t$ - 15/06/2020'
            xlim=(0.4,6))
 ax.set_xlabel('$R_t$');
 fig.tight_layout()
-fig.savefig(path_output+'Posterior Guateamal.jpg', dpi=500)
+fig.savefig(path_output+update_string+'_'+'Posterior_Guatemala.jpg', dpi=500)
 plt.show()
 
 
@@ -190,11 +202,15 @@ def highest_density_interval(pmf, p=.9, debug=False):
 
 # Note that this takes a while to execute - it's not the most efficient algorithm
 hdis = highest_density_interval(posteriors, p=.9)
-
 most_likely = posteriors.idxmax().rename('ML')
 
 # Look into why you shift -1
 result = pd.concat([most_likely, hdis], axis=1)
+
+# Calculating parameters for the day
+cent= result.tail(1)['ML'].values[0]
+up_lim= result.tail(1)['High_90'].values[0]
+lw_lim= result.tail(1)['Low_90'].values[0]
 
 
 def plot_rt(result, ax, state_name):
@@ -265,23 +281,29 @@ def plot_rt(result, ax, state_name):
     ax.yaxis.set_ticks(np.arange(0, 3.2, 0.20))
     ax.set_xlim(pd.Timestamp('2020-04-14'), result.index[-1]+pd.Timedelta(days=1))
     fig.set_facecolor('w')
-
     
 fig, ax = plt.subplots(figsize=(600/72, 400/72))
 plot_rt(result, ax, state_name)
 ax.set_title(f'Número de reproducción en tiempo real $R_t$ para {state_name}')
 ax.xaxis.set_major_locator(mdates.WeekdayLocator())
 ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %d'))
-plt.annotate("Información actualizada con casos hasta el 15/06/2020", (pd.Timestamp('2020-04-17'), 2.5), fontsize= 12, color= 'red')
+plt.annotate("Actualizada hasta el "+update, (pd.Timestamp('2020-04-17'), 2.5), fontsize= 12, color= 'red')
+plt.annotate("Rt: "+str(round(cent, 2)), (pd.Timestamp('2020-06-7'), 2.5), fontsize= 14, color= 'red')
 fig.tight_layout()
-fig.savefig(path_output+'R_t.jpg', dpi=500)
+fig.savefig(path_output+update_string+'_'+'R_t.jpg', dpi=500)
 plt.show()
 
+# Printing result
+if 1 <= lw_lim:
+    print('Malas noticias:')
+    print('Todo el pronóstico de Rt es creciente')
+    print('La Rt es igual a '+str(round(cent, 2)))
+    print('La Rt máxima es igual a '+str(round(up_lim, 2))+' y la mínima de '+str(round(up_lim, 2))+' con un 90% de confianza')
 
-
-
-
-
-
-
-
+else:
+    print('Noticias:')
+    print('No todo el pronóstico de la Rt es creciente')
+    print('La Rt es igual a '+str(round(cent, 2)))
+    print('La Rt máxima es igual a '+str(round(up_lim, 2))+' y la mínima de '+str(round(lw_lim, 2))+' con un 90% de confianza')
+    print('Existe un '+str(round((1-lw_lim)/(up_lim-lw_lim), 2)*100)+'% de probabilidades que la Rt sea inferior a 1 y '+\
+          str(100-round((1-lw_lim)/(up_lim-lw_lim), 2)*100) + '% que sea superior a 1, con un 90% de confianza.')
